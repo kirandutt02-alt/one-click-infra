@@ -1,0 +1,36 @@
+---
+- name: Update yum packages
+  dnf:
+    name: "*"
+    state: latest
+
+- name: Install PostgreSQL
+  dnf:
+    name:
+      - postgresql15-server
+      - postgresql15
+    state: present
+
+- name: Check if PostgreSQL is initialized
+  stat:
+    path: /var/lib/pgsql/data/PG_VERSION
+  register: postgres_data
+
+- name: Initialize PostgreSQL database
+  command: /usr/bin/postgresql-setup --initdb
+  when: not postgres_data.stat.exists
+
+- name: Start PostgreSQL
+  systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Check PostgreSQL service
+  systemd:
+    name: postgresql
+  register: postgres_service
+
+- name: Display PostgreSQL status
+  debug:
+    msg: "PostgreSQL service status: {{ postgres_service.status.ActiveState }}"
