@@ -1,6 +1,14 @@
-pipeline {
 
+pipeline {
     agent any
+
+    parameters {
+        booleanParam(
+            name: 'DESTROY_INFRA',
+            defaultValue: false,
+            description: 'Tick this checkbox to destroy the Terraform-managed infrastructure'
+        )
+    }
 
     environment {
         AWS_DEFAULT_REGION = 'ap-south-1'
@@ -23,6 +31,9 @@ pipeline {
         }
 
         stage('Terraform Validate') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
                 dir('terraform') {
                     sh 'terraform validate'
@@ -31,6 +42,9 @@ pipeline {
         }
 
         stage('Terraform Plan') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
                 dir('terraform') {
                     sh 'terraform plan'
@@ -39,6 +53,9 @@ pipeline {
         }
 
         stage('Terraform Apply') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
                 dir('terraform') {
                     sh 'terraform apply -auto-approve'
@@ -47,6 +64,9 @@ pipeline {
         }
 
         stage('Get EC2 IP') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
                 script {
                     env.EC2_IP = sh(
@@ -60,6 +80,9 @@ pipeline {
         }
 
         stage('Generate Ansible Inventory') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
                 sh '''
                     cat > ansible/inventory/hosts.ini <<EOF
@@ -74,8 +97,10 @@ EOF
         }
 
         stage('Run Ansible') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
-
                 withCredentials([
                     sshUserPrivateKey(
                         credentialsId: 'postgres-ec2-key',
@@ -83,21 +108,22 @@ EOF
                         usernameVariable: 'SSH_USER'
                     )
                 ]) {
-
                     sh '''
-                       ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook \
-                       -i ansible/inventory/hosts.ini \
-                       -u ec2-user \
-                       --private-key "$SSH_KEY" \
-                       ansible/playbooks/postgres.yml
+                        ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook \
+                          -i ansible/inventory/hosts.ini \
+                          -u "$SSH_USER" \
+                          --private-key "$SSH_KEY" \
+                          ansible/playbooks/postgres.yml
                     '''
                 }
             }
         }
 
         stage('Validate PostgreSQL') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
             steps {
-
                 withCredentials([
                     sshUserPrivateKey(
                         credentialsId: 'postgres-ec2-key',
@@ -105,7 +131,6 @@ EOF
                         usernameVariable: 'SSH_USER'
                     )
                 ]) {
-
                     sh '''
                         ansible \
                           -i ansible/inventory/hosts.ini \
@@ -118,20 +143,38 @@ EOF
                 }
             }
         }
+
+        stage('Terraform Destroy') {
+            when {
+                expression { params.DESTROY_INFRA }
+            }
+            steps {
+                dir('terraform') {
+                    sh 'terraform plan -destroy'
+                    sh 'terraform destroy -auto-approve'
+                }
+            }
+        }
     }
 
     post {
-
         success {
-            echo "======================================"
-            echo "PostgreSQL deployment successful!"
-            echo "EC2 IP: ${EC2_IP}"
-            echo "======================================"
+            script {
+                if (params.DESTROY_INFRA) {
+                    echo '======================================'
+                    echo 'Infrastructure destroy completed!'
+                    echo '======================================'
+                } else {
+                    echo '======================================'
+                    echo 'PostgreSQL deployment successful!'
+                    echo "EC2 IP: ${env.EC2_IP}"
+                    echo '======================================'
+                }
+            }
         }
 
         failure {
-            echo "PostgreSQL deployment failed."
-            echo "Check the Jenkins console output."
+            echo 'Pipeline failed. Check the Jenkins console output.'
         }
     }
 }
