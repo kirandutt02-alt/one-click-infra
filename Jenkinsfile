@@ -85,11 +85,11 @@ EOF
                 ]) {
 
                     sh '''
-                        ansible-playbook \
-                          -i ansible/inventory/hosts.ini \
-                          -u "$SSH_USER" \
-                          --private-key "$SSH_KEY" \
-                          ansible/playbooks/postgres.yml
+                       ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook \
+                       -i ansible/inventory/hosts.ini \
+                       -u ec2-user \
+                       --private-key "$SSH_KEY" \
+                       ansible/playbooks/postgres.yml
                     '''
                 }
             }
