@@ -1,70 +1,81 @@
 ---
-- name: Update yum packages
-  dnf:
-    name: "*"
-    state: latest
-
-- name: Install PostgreSQL
+# Install PostgreSQL packages and Python driver
+- name: Install PostgreSQL packages
   dnf:
     name:
       - postgresql15-server
       - postgresql15
+      - python3-psycopg2
     state: present
 
-- name: Check if PostgreSQL is initialized
+# Initialize PostgreSQL only once
+- name: Check PostgreSQL initialization
   stat:
     path: /var/lib/pgsql/data/PG_VERSION
   register: postgres_data
 
-- name: Initialize PostgreSQL database
+- name: Initialize PostgreSQL
   command: /usr/bin/postgresql-setup --initdb
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
   when: not postgres_data.stat.exists
 
-- name: Listen on all interfaces (access is limited by the DB security group)
+# Configure PostgreSQL network access
+- name: Configure PostgreSQL listening address
   lineinfile:
     path: /var/lib/pgsql/data/postgresql.conf
     regexp: '^#?\s*listen_addresses\s*='
     line: "listen_addresses = '*'"
   notify: Restart PostgreSQL
 
-- name: Allow the app tier to connect with a password
+# Configure password authentication
+- name: Configure PostgreSQL client authentication
   blockinfile:
     path: /var/lib/pgsql/data/pg_hba.conf
-    marker: "# {mark} ANSIBLE MANAGED - app access"
+    marker: "# {mark} ANSIBLE MANAGED"
     block: |
-      host    {{ db_name }}    {{ db_user }}    {{ db_allowed_cidr }}    scram-sha-256
+      host {{ db_name }} {{ db_user }} {{ db_allowed_cidr }} scram-sha-256
   notify: Restart PostgreSQL
 
-- name: Start PostgreSQL
+# Start PostgreSQL
+- name: Start PostgreSQL service
   systemd:
     name: postgresql
     state: started
     enabled: true
 
-- name: Apply config changes now
+# Apply configuration changes
+- name: Apply PostgreSQL configuration
   meta: flush_handlers
 
-- name: Create or update application role
+# Create PostgreSQL user
+- name: Create PostgreSQL application user
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    role_attr_flags: LOGIN
+    state: present
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
   become_user: postgres
-  shell: |
-    psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname='{{ db_user }}'" | grep -q 1 \
-      && psql -v ON_ERROR_STOP=1 -c "ALTER ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}'" \
-      || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}'"
   no_log: true
-  changed_when: true
 
-- name: Create application database
+# Create PostgreSQL database
+- name: Create PostgreSQL database
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    state: present
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
   become_user: postgres
-  shell: |
-    psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'" | grep -q 1 \
-      || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE {{ db_name }} OWNER {{ db_user }}"
-  changed_when: false
 
+# Check PostgreSQL service
 - name: Check PostgreSQL service
-  systemd:
-    name: postgresql
-  register: postgres_service
+  command: systemctl is-active postgresql
+  register: postgres_status
+  changed_when: false
 
 - name: Display PostgreSQL status
   debug:
-    msg: "PostgreSQL service status: {{ postgres_service.status.ActiveState }}"
+    msg: "PostgreSQL is {{ postgres_status.stdout }}"

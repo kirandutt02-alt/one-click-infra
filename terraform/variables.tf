@@ -49,3 +49,9 @@ variable "db_user" {
   type    = string
   default = "appuser"
 }
+
+
+variable "db_port" {
+  type    = number
+  default = 5432
+}
