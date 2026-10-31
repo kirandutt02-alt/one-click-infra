@@ -1,8 +1,3 @@
-"""2-tier demo app: Flask UI + JSON API on top of PostgreSQL.
-
-Lets you create your own tables (name + typed columns), list databases/tables,
-insert rows and delete rows, to show the app can talk to Postgres.
-"""
 import os
 import re
 
@@ -52,7 +47,6 @@ def valid_ident(value, what):
 
 
 def user_columns(cur, table):
-    """Column list of a public table, or None if the table does not exist."""
     cur.execute(
         """SELECT column_name, data_type FROM information_schema.columns
            WHERE table_schema = 'public' AND table_name = %s
@@ -61,7 +55,6 @@ def user_columns(cur, table):
     )
     out = []
     for r in cur.fetchall():
-        # Works with both normal and dict cursors
         if isinstance(r, dict):
             out.append({"name": r["column_name"], "type": r["data_type"]})
         else:
@@ -84,7 +77,6 @@ def index():
 
 @app.get("/health")
 def health():
-    # Used by the ALB. Always 200 so the app stays in service even if the DB is not ready yet.
     return "ok", 200
 
 
@@ -95,13 +87,12 @@ def status():
             cur.execute("SELECT version()")
             version = cur.fetchone()[0]
             return jsonify(connected=True, host=DB["host"], version=version)
-    except Exception as exc:  # noqa: BLE001 - demo app, report any failure
+    except Exception as exc:
         return jsonify(connected=False, host=DB["host"], error=str(exc)), 200
 
 
 @app.get("/api/dbinfo")
 def db_info():
-    """Like 'show databases' and 'show tables' for this connection."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname")
         databases = [r[0] for r in cur.fetchall()]
@@ -171,7 +162,6 @@ def insert_row(name):
     with get_conn() as conn, conn.cursor() as cur:
         table, cols = require_table(cur, name)
         names = [c["name"] for c in cols if c["name"] != "id"]
-        # Empty input becomes NULL; Postgres casts the text to the column type.
         data = {n: (values.get(n) if values.get(n) not in ("", None) else None) for n in names}
         if names:
             cur.execute(
@@ -201,13 +191,11 @@ def bad_request(exc):
 
 @app.errorhandler(psycopg2.DataError)
 def data_error(exc):
-    # e.g. text typed into an INTEGER column
     return jsonify(error=str(exc).strip().split("\n")[0]), 400
 
 
 @app.errorhandler(Exception)
 def any_error(exc):
-    # Return JSON so the UI shows the real message instead of "Internal Server Error"
     if isinstance(exc, HTTPException):
         return jsonify(error=exc.description), exc.code
     app.logger.exception("Unhandled error")
