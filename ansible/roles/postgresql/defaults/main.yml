@@ -1,0 +1,5 @@
+---
+db_name: appdb
+db_user: appuser
+# db_password has no default: Jenkins passes it in from the Terraform output
+db_allowed_cidr: 10.2.0.0/16

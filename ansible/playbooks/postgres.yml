@@ -3,5 +3,12 @@
   hosts: postgres
   become: true
 
+  pre_tasks:
+    # The DB is reached through the app EC2, which may still be booting.
+    - name: Wait for SSH to the DB host (via the app jump host)
+      wait_for_connection:
+        delay: 5
+        timeout: 300
+
   roles:
     - postgresql

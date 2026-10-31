@@ -1,3 +1,50 @@
+# Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Ansible
+.ansible/
+*.retry
+vault_pass
+*.vault
+
+# Python / Flask
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local tooling / editor files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*.log
+
+# Build output
+build/
+dist/
+*.egg-info/

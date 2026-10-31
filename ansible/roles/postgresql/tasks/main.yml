@@ -20,11 +20,45 @@
   command: /usr/bin/postgresql-setup --initdb
   when: not postgres_data.stat.exists
 
+- name: Listen on all interfaces (access is limited by the DB security group)
+  lineinfile:
+    path: /var/lib/pgsql/data/postgresql.conf
+    regexp: '^#?\s*listen_addresses\s*='
+    line: "listen_addresses = '*'"
+  notify: Restart PostgreSQL
+
+- name: Allow the app tier to connect with a password
+  blockinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    marker: "# {mark} ANSIBLE MANAGED - app access"
+    block: |
+      host    {{ db_name }}    {{ db_user }}    {{ db_allowed_cidr }}    scram-sha-256
+  notify: Restart PostgreSQL
+
 - name: Start PostgreSQL
   systemd:
     name: postgresql
     state: started
     enabled: true
+
+- name: Apply config changes now
+  meta: flush_handlers
+
+- name: Create or update application role
+  become_user: postgres
+  shell: |
+    psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname='{{ db_user }}'" | grep -q 1 \
+      && psql -v ON_ERROR_STOP=1 -c "ALTER ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}'" \
+      || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}'"
+  no_log: true
+  changed_when: true
+
+- name: Create application database
+  become_user: postgres
+  shell: |
+    psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'" | grep -q 1 \
+      || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE {{ db_name }} OWNER {{ db_user }}"
+  changed_when: false
 
 - name: Check PostgreSQL service
   systemd:

@@ -63,40 +63,35 @@ pipeline {
             }
         }
 
-        stage('Get EC2 IP') {
+        stage('Read Terraform Outputs') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
             steps {
                 script {
-                    env.EC2_IP = sh(
-                        script: 'cd terraform && terraform output -raw ec2_public_ip',
+                    env.APP_IP = sh(
+                        script: 'cd terraform && terraform output -raw app_public_ip',
                         returnStdout: true
                     ).trim()
 
-                    echo "EC2 Public IP: ${env.EC2_IP}"
+                    env.DB_IP = sh(
+                        script: 'cd terraform && terraform output -raw db_private_ip',
+                        returnStdout: true
+                    ).trim()
+
+                    env.ALB_DNS = sh(
+                        script: 'cd terraform && terraform output -raw alb_dns_name',
+                        returnStdout: true
+                    ).trim()
+
+                    echo "App (jump host) public IP: ${env.APP_IP}"
+                    echo "DB private IP: ${env.DB_IP}"
+                    echo "ALB DNS: ${env.ALB_DNS}"
                 }
             }
         }
 
-        stage('Generate Ansible Inventory') {
-            when {
-                expression { !params.DESTROY_INFRA }
-            }
-            steps {
-                sh '''
-                    cat > ansible/inventory/hosts.ini <<EOF
-[postgres]
-postgres-server ansible_host=${EC2_IP}
-
-[postgres:vars]
-ansible_python_interpreter=/usr/bin/python3
-EOF
-                '''
-            }
-        }
-
-        stage('Run Ansible') {
+        stage('Configure PostgreSQL') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
@@ -109,10 +104,33 @@ EOF
                     )
                 ]) {
                     sh '''
+                        set -e
+
+                        # Inventory: DB has only a private IP, so SSH goes through the app EC2.
+                        cat > ansible/inventory/hosts.ini <<EOF
+[postgres]
+postgres-db ansible_host=${DB_IP}
+
+[postgres:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q ${SSH_USER}@${APP_IP}"'
+EOF
+
+                        # DB credentials come from Terraform; keep them out of the console log.
+                        umask 077
+                        VARS_FILE="$(mktemp)"
+                        trap 'rm -f "$VARS_FILE"' EXIT
+                        DB_NAME="$(cd terraform && terraform output -raw db_name)"
+                        DB_USER="$(cd terraform && terraform output -raw db_user)"
+                        DB_PASSWORD="$(cd terraform && terraform output -raw db_password)"
+                        printf 'db_name: "%s"\\ndb_user: "%s"\\ndb_password: "%s"\\n' \
+                          "$DB_NAME" "$DB_USER" "$DB_PASSWORD" > "$VARS_FILE"
+
                         ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook \
                           -i ansible/inventory/hosts.ini \
                           -u "$SSH_USER" \
                           --private-key "$SSH_KEY" \
+                          -e "@$VARS_FILE" \
                           ansible/playbooks/postgres.yml
                     '''
                 }
@@ -144,6 +162,27 @@ EOF
             }
         }
 
+        stage('Validate App via ALB') {
+            when {
+                expression { !params.DESTROY_INFRA }
+            }
+            steps {
+                // The ALB needs a minute to mark the app healthy; retry for ~5 minutes.
+                sh '''
+                    for i in $(seq 1 30); do
+                      if curl -fsS "http://${ALB_DNS}/api/status" | grep -q '"connected":true'; then
+                        echo "App is reachable through the ALB and connected to PostgreSQL"
+                        exit 0
+                      fi
+                      echo "Waiting for ALB / app / DB ($i/30)..."
+                      sleep 10
+                    done
+                    echo "App did not report a DB connection in time"
+                    exit 1
+                '''
+            }
+        }
+
         stage('Terraform Destroy') {
             when {
                 expression { params.DESTROY_INFRA }
@@ -166,8 +205,10 @@ EOF
                     echo '======================================'
                 } else {
                     echo '======================================'
-                    echo 'PostgreSQL deployment successful!'
-                    echo "EC2 IP: ${env.EC2_IP}"
+                    echo 'Deployment successful!'
+                    echo "Open the app: http://${env.ALB_DNS}"
+                    echo "App / jump host IP: ${env.APP_IP}"
+                    echo "DB private IP: ${env.DB_IP}"
                     echo '======================================'
                 }
             }

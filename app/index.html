@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postgres 2-tier demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: .25rem; }
+  .badge { display: inline-block; padding: .2rem .6rem; border-radius: 999px; font-size: .85rem; color: #fff; background: #888; }
+  .ok { background: #1a7f37; } .bad { background: #c0392b; }
+  .row { display: flex; gap: .5rem; margin: 1rem 0; }
+  input[type=text] { flex: 1; padding: .5rem; }
+  button { padding: .5rem .8rem; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #ddd; }
+  #msg { color: #c0392b; min-height: 1.2rem; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>Postgres 2-tier demo</h1>
+<p>Status: <span id="badge" class="badge">checking...</span> <small id="detail"></small></p>
+
+<div class="row">
+  <button onclick="createTable()">Create table</button>
+  <button onclick="dropTable()">Drop table</button>
+  <button onclick="refresh()">Refresh</button>
+</div>
+
+<div class="row">
+  <input id="title" type="text" placeholder="New note title" onkeydown="if(event.key==='Enter')addNote()">
+  <button onclick="addNote()">Add</button>
+</div>
+<div id="msg"></div>
+
+<table>
+  <thead><tr><th>ID</th><th>Title</th><th>Created</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<script>
+const msg = t => document.getElementById('msg').textContent = t || '';
+
+async function api(path, opts) {
+  const res = await fetch(path, opts && opts.body
+    ? { ...opts, headers: { 'Content-Type': 'application/json' } } : opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+async function status() {
+  const b = document.getElementById('badge'), d = document.getElementById('detail');
+  try {
+    const s = await api('/api/status');
+    b.textContent = s.connected ? 'DB connected' : 'DB not connected';
+    b.className = 'badge ' + (s.connected ? 'ok' : 'bad');
+    d.textContent = s.connected
+      ? s.host + ' - ' + s.version.split(' on ')[0] + (s.table_exists ? '' : ' - table not created yet')
+      : s.host + ' - ' + (s.error || '').split('\n')[0];
+    return s.connected;
+  } catch (e) {
+    b.textContent = 'app error'; b.className = 'badge bad'; d.textContent = e.message;
+    return false;
+  }
+}
+
+async function loadRows() {
+  const tbody = document.getElementById('rows');
+  try {
+    const rows = await api('/api/notes');
+    tbody.innerHTML = '';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td></td><td></td><td></td><td></td>';
+      tr.children[0].textContent = r.id;
+      tr.children[1].textContent = r.title;
+      tr.children[2].textContent = new Date(r.created_at).toLocaleString();
+      const edit = document.createElement('button'); edit.textContent = 'Edit';
+      edit.onclick = () => editNote(r.id, r.title);
+      const del = document.createElement('button'); del.textContent = 'Delete';
+      del.onclick = () => delNote(r.id);
+      tr.children[3].append(edit, ' ', del);
+      tbody.appendChild(tr);
+    });
+    msg('');
+  } catch (e) { tbody.innerHTML = ''; msg(e.message); }
+}
+
+async function refresh() { if (await status()) await loadRows(); }
+async function createTable() { try { await api('/api/table', { method: 'POST' }); await refresh(); } catch (e) { msg(e.message); } }
+async function dropTable() { try { await api('/api/table', { method: 'DELETE' }); await refresh(); } catch (e) { msg(e.message); } }
+async function addNote() {
+  const el = document.getElementById('title'), title = el.value.trim();
+  if (!title) return;
+  try { await api('/api/notes', { method: 'POST', body: JSON.stringify({ title }) }); el.value = ''; await loadRows(); }
+  catch (e) { msg(e.message); }
+}
+async function editNote(id, old) {
+  const title = prompt('Edit title', old);
+  if (title === null || !title.trim()) return;
+  try { await api('/api/notes/' + id, { method: 'PUT', body: JSON.stringify({ title }) }); await loadRows(); }
+  catch (e) { msg(e.message); }
+}
+async function delNote(id) {
+  try { await api('/api/notes/' + id, { method: 'DELETE' }); await loadRows(); } catch (e) { msg(e.message); }
+}
+
+refresh();
+setInterval(status, 10000);  // badge turns green by itself once Ansible has finished
+</script>
+</body>
+</html>
