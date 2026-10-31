@@ -40,14 +40,14 @@ pipeline {
     stages {
 
         // Get source code from GitHub
-        stage('Checkout') {
+        stage('Checkout Source Code') {
             steps {
                 checkout scm
             }
         }
 
         // Initialize Terraform
-        stage('Terraform Init') {
+        stage('Initialize Terraform') {
             steps {
                 dir('terraform') {
                     sh 'terraform init'
@@ -56,7 +56,7 @@ pipeline {
         }
 
         // Create AWS infrastructure
-        stage('Deploy Infrastructure') {
+        stage('Provision AWS Infrastructure') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
@@ -81,7 +81,7 @@ pipeline {
         }
 
         // Get Terraform outputs and configure PostgreSQL
-        stage('Configure PostgreSQL') {
+        stage('Configure PostgreSQL Using Ansible') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
@@ -116,13 +116,13 @@ pipeline {
 
                         # Create Ansible inventory
                         cat > ansible/inventory/hosts.ini <<EOF
-[postgres]
-postgres-db ansible_host=${DB_IP}
-
-[postgres:vars]
-ansible_python_interpreter=/usr/bin/python3
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q ${SSH_USER}@${APP_IP}"'
-EOF
+                        [postgres]
+                        postgres-db ansible_host=${DB_IP}
+                        
+                        [postgres:vars]
+                        ansible_python_interpreter=/usr/bin/python3
+                        ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q ${SSH_USER}@${APP_IP}"'
+                        EOF
 
                         # Install required Ansible collection
                         ansible-galaxy collection install \
@@ -135,26 +135,26 @@ EOF
 
                         # Read Terraform outputs without printing secrets
                         python3 - "$VARS_FILE" <<'PY'
-import json
-import subprocess
-import sys
+                        import json
+                        import subprocess
+                        import sys
 
-result = subprocess.check_output(
-    ["terraform", "-chdir=terraform", "output", "-json"],
-    text=True
-)
+                        result = subprocess.check_output(
+                            ["terraform", "-chdir=terraform", "output", "-json"],
+                            text=True
+                        )
 
-outputs = json.loads(result)
+                        outputs = json.loads(result)
 
-variables = {
-    "db_name": outputs["db_name"]["value"],
-    "db_user": outputs["db_user"]["value"],
-    "db_password": outputs["db_password"]["value"]
-}
+                        variables = {
+                            "db_name": outputs["db_name"]["value"],
+                            "db_user": outputs["db_user"]["value"],
+                            "db_password": outputs["db_password"]["value"]
+                        }
 
-with open(sys.argv[1], "w") as file:
-    json.dump(variables, file)
-PY
+                        with open(sys.argv[1], "w") as file:
+                            json.dump(variables, file)
+                        PY
 
                         # Deploy PostgreSQL using Ansible role
                         ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook \
@@ -169,7 +169,7 @@ PY
         }
 
         // Verify PostgreSQL installation
-        stage('Validate PostgreSQL') {
+        stage('Verify PostgreSQL Service') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
@@ -196,7 +196,7 @@ PY
         }
 
         // Verify application and database connectivity
-        stage('Validate Application') {
+        stage('Verify Application and Database Connectivity') {
             when {
                 expression { !params.DESTROY_INFRA }
             }
@@ -223,7 +223,7 @@ PY
         }
 
         // Destroy all Terraform-managed infrastructure
-        stage('Destroy Infrastructure') {
+        stage('Destroy AWS Infrastructure') {
             when {
                 expression { params.DESTROY_INFRA }
             }
