@@ -1,15 +1,24 @@
-output "vpc_id" {
-  value = module.vpc.vpc_id
+output "alb_dns_name" {
+  description = "Application Load Balancer DNS name"
+  value       = module.alb.alb_dns_name
 }
 
-output "ec2_instance_id" {
-  value = module.ec2.instance_id
+output "app_a_public_ip" {
+  description = "Application Server A public IP"
+  value       = module.ec2.app_a_public_ip
 }
 
-output "ec2_public_ip" {
-  value = module.ec2.public_ip
+output "app_b_public_ip" {
+  description = "Application Server B public IP"
+  value       = module.ec2.app_b_public_ip
 }
 
-output "postgres_security_group_id" {
-  value = module.security_group.security_group_id
+output "postgres_a_private_ip" {
+  description = "PostgreSQL Server A private IP"
+  value       = module.ec2.postgres_a_private_ip
+}
+
+output "postgres_b_private_ip" {
+  description = "PostgreSQL Server B private IP"
+  value       = module.ec2.postgres_b_private_ip
 }

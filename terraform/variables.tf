@@ -13,9 +13,14 @@ variable "vpc_cidr" {
   default = "10.2.0.0/16"
 }
 
-variable "subnet_cidr" {
+variable "subnet_a_cidr" {
   type    = string
   default = "10.2.1.0/24"
+}
+
+variable "subnet_b_cidr" {
+  type    = string
+  default = "10.2.2.0/24"
 }
 
 variable "instance_type" {
@@ -33,8 +38,17 @@ variable "ssh_allowed_cidr" {
   type        = string
 }
 
-variable "postgres_allowed_cidr" {
-  description = "Trusted client CIDR allowed to access PostgreSQL"
-  type        = string
-  default     = "127.0.0.1/32"
+variable "postgres_database" {
+  type    = string
+  default = "postgresdb"
+}
+
+variable "postgres_username" {
+  type    = string
+  default = "postgres"
+}
+
+variable "postgres_password" {
+  type      = string
+  sensitive = true
 }

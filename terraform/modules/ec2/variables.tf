@@ -2,11 +2,19 @@ variable "project_name" {
   type = string
 }
 
-variable "subnet_id" {
+variable "subnet_a_id" {
   type = string
 }
 
-variable "security_group_id" {
+variable "subnet_b_id" {
+  type = string
+}
+
+variable "app_security_group_id" {
+  type = string
+}
+
+variable "database_security_group_id" {
   type = string
 }
 

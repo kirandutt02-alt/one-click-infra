@@ -9,7 +9,3 @@ variable "vpc_id" {
 variable "ssh_allowed_cidr" {
   type = string
 }
-
-variable "postgres_allowed_cidr" {
-  type = string
-}
