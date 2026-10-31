@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -140,8 +139,8 @@ import subprocess
 import sys
 
 result = subprocess.check_output(
-["terraform", "-chdir=terraform", "output", "-json"],
-text=True
+    ["terraform", "-chdir=terraform", "output", "-json"],
+    text=True
 )
 
 outputs = json.loads(result)
@@ -153,7 +152,7 @@ variables = {
 }
 
 with open(sys.argv[1], "w") as file:
-json.dump(variables, file)
+    json.dump(variables, file)
 PY
 
                         # Deploy PostgreSQL using Ansible role
@@ -223,7 +222,7 @@ PY
         }
 
         // Destroy all Terraform-managed infrastructure
-        stage('Destroy Infrastructure') {
+        stage('Destroy AWS Infrastructure (Conditional)') {
             when {
                 expression { params.DESTROY_INFRA }
             }
