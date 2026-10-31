@@ -2,19 +2,16 @@ variable "project_name" {
   type = string
 }
 
-variable "subnet_a_id" {
+variable "name" {
+  description = "Role name used in the Name tag, e.g. app or db"
+  type        = string
+}
+
+variable "subnet_id" {
   type = string
 }
 
-variable "subnet_b_id" {
-  type = string
-}
-
-variable "app_security_group_id" {
-  type = string
-}
-
-variable "database_security_group_id" {
+variable "security_group_id" {
   type = string
 }
 
@@ -24,4 +21,14 @@ variable "instance_type" {
 
 variable "key_name" {
   type = string
+}
+
+variable "associate_public_ip" {
+  type    = bool
+  default = false
+}
+
+variable "user_data" {
+  type    = string
+  default = null
 }

@@ -7,5 +7,6 @@ variable "vpc_id" {
 }
 
 variable "ssh_allowed_cidr" {
-  type = string
+  description = "CIDR allowed to SSH to the app EC2 (the Jenkins server IP)"
+  type        = string
 }

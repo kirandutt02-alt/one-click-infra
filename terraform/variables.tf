@@ -13,14 +13,16 @@ variable "vpc_cidr" {
   default = "10.2.0.0/16"
 }
 
-variable "subnet_a_cidr" {
-  type    = string
-  default = "10.2.1.0/24"
+variable "public_subnet_cidrs" {
+  description = "Two public subnets in different AZs (ALB needs two)"
+  type        = list(string)
+  default     = ["10.2.1.0/24", "10.2.2.0/24"]
 }
 
-variable "subnet_b_cidr" {
-  type    = string
-  default = "10.2.2.0/24"
+variable "private_subnet_cidr" {
+  description = "Private subnet for the database"
+  type        = string
+  default     = "10.2.10.0/24"
 }
 
 variable "instance_type" {
@@ -34,21 +36,16 @@ variable "key_name" {
 }
 
 variable "ssh_allowed_cidr" {
-  description = "Your trusted public IP in CIDR notation"
+  description = "Jenkins server public IP in CIDR notation (allowed to SSH to the app EC2)"
   type        = string
 }
 
-variable "postgres_database" {
+variable "db_name" {
   type    = string
-  default = "postgresdb"
+  default = "appdb"
 }
 
-variable "postgres_username" {
+variable "db_user" {
   type    = string
-  default = "postgres"
-}
-
-variable "postgres_password" {
-  type      = string
-  sensitive = true
+  default = "appuser"
 }

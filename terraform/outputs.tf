@@ -1,24 +1,30 @@
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
 output "alb_dns_name" {
-  description = "Application Load Balancer DNS name"
+  description = "Open this in a browser to use the app"
   value       = module.alb.alb_dns_name
 }
 
-output "app_a_public_ip" {
-  description = "Application Server A public IP"
-  value       = module.ec2.app_a_public_ip
+output "app_public_ip" {
+  description = "Jump host / app server"
+  value       = module.app.public_ip
 }
 
-output "app_b_public_ip" {
-  description = "Application Server B public IP"
-  value       = module.ec2.app_b_public_ip
+output "db_private_ip" {
+  value = module.db.private_ip
 }
 
-output "postgres_a_private_ip" {
-  description = "PostgreSQL Server A private IP"
-  value       = module.ec2.postgres_a_private_ip
+output "db_name" {
+  value = var.db_name
 }
 
-output "postgres_b_private_ip" {
-  description = "PostgreSQL Server B private IP"
-  value       = module.ec2.postgres_b_private_ip
+output "db_user" {
+  value = var.db_user
+}
+
+output "db_password" {
+  value     = random_password.db.result
+  sensitive = true
 }

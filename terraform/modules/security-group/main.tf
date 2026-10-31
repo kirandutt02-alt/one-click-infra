@@ -1,10 +1,11 @@
+# ALB: HTTP from anywhere
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
-  description = "Security group for Application Load Balancer"
+  description = "ALB - HTTP from the internet"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "HTTP from Internet"
+    description = "HTTP from anywhere"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -23,13 +24,14 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# App: 8080 from the ALB, SSH from Jenkins
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-app-sg"
-  description = "Security group for application servers"
+  description = "App EC2 - 8080 from ALB, SSH from Jenkins"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "Application traffic from ALB"
+    description     = "App port from ALB"
     from_port       = 8080
     to_port         = 8080
     protocol        = "tcp"
@@ -37,7 +39,7 @@ resource "aws_security_group" "app" {
   }
 
   ingress {
-    description = "SSH from trusted IP"
+    description = "SSH from Jenkins"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -56,13 +58,14 @@ resource "aws_security_group" "app" {
   }
 }
 
-resource "aws_security_group" "database" {
+# DB: 5432 and SSH only from the app SG (app EC2 is the jump host)
+resource "aws_security_group" "db" {
   name        = "${var.project_name}-db-sg"
-  description = "Security group for PostgreSQL servers"
+  description = "DB EC2 - PostgreSQL and SSH from the app tier only"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "PostgreSQL from application servers"
+    description     = "PostgreSQL from app"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
@@ -70,11 +73,11 @@ resource "aws_security_group" "database" {
   }
 
   ingress {
-    description = "SSH from trusted IP"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_allowed_cidr]
+    description     = "SSH from app (jump host)"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.app.id]
   }
 
   egress {
