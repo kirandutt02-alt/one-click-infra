@@ -1,9 +1,16 @@
-"""Tiny 2-tier demo app: Flask UI + JSON API on top of PostgreSQL."""
+"""2-tier demo app: Flask UI + JSON API on top of PostgreSQL.
+
+Lets you create your own tables (name + typed columns), list databases/tables,
+insert rows and delete rows, to show the app can talk to Postgres.
+"""
 import os
+import re
 
 import psycopg2
 import psycopg2.extras
 from flask import Flask, jsonify, request, send_from_directory
+from psycopg2 import sql
+from werkzeug.exceptions import HTTPException
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,14 +23,58 @@ DB = dict(
     connect_timeout=3,
 )
 
+IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,39}$")
+TYPES = {
+    "text": "TEXT",
+    "integer": "INTEGER",
+    "numeric": "NUMERIC",
+    "boolean": "BOOLEAN",
+    "date": "DATE",
+    "timestamp": "TIMESTAMP",
+}
+MAX_COLUMNS = 20
+
+
+class BadRequest(Exception):
+    pass
+
 
 def get_conn():
     return psycopg2.connect(**DB)
 
 
-def table_exists(cur):
-    cur.execute("SELECT to_regclass('public.notes') IS NOT NULL")
-    return cur.fetchone()[0]
+def valid_ident(value, what):
+    value = (value or "").strip().lower()
+    if not IDENT.match(value):
+        raise BadRequest(f"Invalid {what} '{value}': use lowercase letters, digits and underscores, "
+                         "starting with a letter or underscore (max 40 chars).")
+    return value
+
+
+def user_columns(cur, table):
+    """Column list of a public table, or None if the table does not exist."""
+    cur.execute(
+        """SELECT column_name, data_type FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = %s
+           ORDER BY ordinal_position""",
+        (table,),
+    )
+    out = []
+    for r in cur.fetchall():
+        # Works with both normal and dict cursors
+        if isinstance(r, dict):
+            out.append({"name": r["column_name"], "type": r["data_type"]})
+        else:
+            out.append({"name": r[0], "type": r[1]})
+    return out or None
+
+
+def require_table(cur, name):
+    table = valid_ident(name, "table name")
+    cols = user_columns(cur, table)
+    if cols is None:
+        raise BadRequest(f"Table '{table}' does not exist")
+    return table, cols
 
 
 @app.get("/")
@@ -43,75 +94,124 @@ def status():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT version()")
             version = cur.fetchone()[0]
-            return jsonify(connected=True, host=DB["host"], version=version,
-                           table_exists=table_exists(cur))
+            return jsonify(connected=True, host=DB["host"], version=version)
     except Exception as exc:  # noqa: BLE001 - demo app, report any failure
         return jsonify(connected=False, host=DB["host"], error=str(exc)), 200
 
 
-@app.post("/api/table")
-def create_table():
+@app.get("/api/dbinfo")
+def db_info():
+    """Like 'show databases' and 'show tables' for this connection."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname")
+        databases = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT current_database()")
+        current = cur.fetchone()[0]
         cur.execute(
-            """CREATE TABLE IF NOT EXISTS notes (
-                   id SERIAL PRIMARY KEY,
-                   title TEXT NOT NULL,
-                   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-               )"""
+            """SELECT table_name FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+               ORDER BY table_name"""
         )
-    return jsonify(ok=True)
+        tables = []
+        for (name,) in cur.fetchall():
+            cur.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(name)))
+            tables.append({"name": name, "rows": cur.fetchone()[0],
+                           "columns": user_columns(cur, name)})
+    return jsonify(current=current, databases=databases, tables=tables)
 
 
-@app.delete("/api/table")
-def drop_table():
+@app.post("/api/tables")
+def create_table():
+    body = request.get_json(silent=True) or {}
+    table = valid_ident(body.get("name"), "table name")
+    cols = body.get("columns") or []
+    if len(cols) > MAX_COLUMNS:
+        raise BadRequest(f"At most {MAX_COLUMNS} columns")
+
+    defs = [sql.SQL("id SERIAL PRIMARY KEY")]
+    seen = {"id"}
+    for col in cols:
+        name = valid_ident(col.get("name"), "column name")
+        ctype = TYPES.get((col.get("type") or "").lower())
+        if name in seen:
+            raise BadRequest(f"Duplicate column name '{name}' (an 'id' column is added automatically)")
+        if not ctype:
+            raise BadRequest(f"Unsupported type for column '{name}'")
+        seen.add(name)
+        defs.append(sql.SQL("{} {}").format(sql.Identifier(name), sql.SQL(ctype)))
+
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS notes")
-    return jsonify(ok=True)
+        if user_columns(cur, table) is not None:
+            raise BadRequest(f"Table '{table}' already exists")
+        cur.execute(sql.SQL("CREATE TABLE {} ({})").format(
+            sql.Identifier(table), sql.SQL(", ").join(defs)))
+    return jsonify(ok=True, message=f"Table '{table}' created successfully"), 201
 
 
-@app.get("/api/notes")
-def list_notes():
-    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        if not table_exists(cur):
-            return jsonify(error="Table 'notes' does not exist. Click 'Create table' first."), 404
-        cur.execute("SELECT id, title, created_at FROM notes ORDER BY id")
-        return jsonify(cur.fetchall())
-
-
-@app.post("/api/notes")
-def add_note():
-    title = (request.get_json(silent=True) or {}).get("title", "").strip()
-    if not title:
-        return jsonify(error="title is required"), 400
-    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        if not table_exists(cur):
-            return jsonify(error="Table 'notes' does not exist. Click 'Create table' first."), 404
-        cur.execute("INSERT INTO notes (title) VALUES (%s) RETURNING id, title, created_at", (title,))
-        return jsonify(cur.fetchone()), 201
-
-
-@app.put("/api/notes/<int:note_id>")
-def update_note(note_id):
-    title = (request.get_json(silent=True) or {}).get("title", "").strip()
-    if not title:
-        return jsonify(error="title is required"), 400
-    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("UPDATE notes SET title = %s WHERE id = %s RETURNING id, title, created_at",
-                    (title, note_id))
-        row = cur.fetchone()
-        return (jsonify(row), 200) if row else (jsonify(error="not found"), 404)
-
-
-@app.delete("/api/notes/<int:note_id>")
-def delete_note(note_id):
+@app.delete("/api/tables/<name>")
+def drop_table(name):
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM notes WHERE id = %s", (note_id,))
-        return jsonify(deleted=cur.rowcount)
+        table, _ = require_table(cur, name)
+        cur.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier(table)))
+    return jsonify(ok=True, message=f"Table '{table}' dropped")
 
 
-@app.errorhandler(psycopg2.Error)
-def db_error(exc):
-    return jsonify(error=str(exc).strip()), 500
+@app.get("/api/tables/<name>/rows")
+def list_rows(name):
+    with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        table, cols = require_table(name=name, cur=cur)
+        cur.execute(sql.SQL("SELECT * FROM {} ORDER BY id LIMIT 500").format(sql.Identifier(table)))
+        rows = cur.fetchall()
+    return jsonify(table=table, columns=cols, rows=rows)
+
+
+@app.post("/api/tables/<name>/rows")
+def insert_row(name):
+    values = (request.get_json(silent=True) or {}).get("values") or {}
+    with get_conn() as conn, conn.cursor() as cur:
+        table, cols = require_table(cur, name)
+        names = [c["name"] for c in cols if c["name"] != "id"]
+        # Empty input becomes NULL; Postgres casts the text to the column type.
+        data = {n: (values.get(n) if values.get(n) not in ("", None) else None) for n in names}
+        if names:
+            cur.execute(
+                sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+                    sql.Identifier(table),
+                    sql.SQL(", ").join(sql.Identifier(n) for n in names),
+                    sql.SQL(", ").join(sql.Placeholder() for _ in names)),
+                [data[n] for n in names])
+        else:
+            cur.execute(sql.SQL("INSERT INTO {} DEFAULT VALUES").format(sql.Identifier(table)))
+    return jsonify(ok=True, message=f"Row added to '{table}'"), 201
+
+
+@app.delete("/api/tables/<name>/rows/<int:row_id>")
+def delete_row(name, row_id):
+    with get_conn() as conn, conn.cursor() as cur:
+        table, _ = require_table(cur, name)
+        cur.execute(sql.SQL("DELETE FROM {} WHERE id = %s").format(sql.Identifier(table)), (row_id,))
+        deleted = cur.rowcount
+    return jsonify(ok=True, deleted=deleted, message=f"Deleted {deleted} row(s) from '{table}'")
+
+
+@app.errorhandler(BadRequest)
+def bad_request(exc):
+    return jsonify(error=str(exc)), 400
+
+
+@app.errorhandler(psycopg2.DataError)
+def data_error(exc):
+    # e.g. text typed into an INTEGER column
+    return jsonify(error=str(exc).strip().split("\n")[0]), 400
+
+
+@app.errorhandler(Exception)
+def any_error(exc):
+    # Return JSON so the UI shows the real message instead of "Internal Server Error"
+    if isinstance(exc, HTTPException):
+        return jsonify(error=exc.description), exc.code
+    app.logger.exception("Unhandled error")
+    return jsonify(error=f"{type(exc).__name__}: {str(exc).strip()}"), 500
 
 
 if __name__ == "__main__":
