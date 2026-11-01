@@ -25,6 +25,6 @@ output "db_user" {
 }
 
 output "db_password" {
-  value     = random_password.db.result
+  value     = var.db_password
   sensitive = true
 }

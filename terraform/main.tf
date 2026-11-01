@@ -15,12 +15,6 @@ module "security_group" {
   ssh_allowed_cidr = var.ssh_allowed_cidr
 }
 
-# Generated DB password. Alphanumeric only so it is safe in shell, SQL and env files.
-resource "random_password" "db" {
-  length  = 20
-  special = false
-}
-
 # Database server: private subnet, no public IP. Postgres is installed by Ansible.
 module "db" {
   source = "./modules/ec2"
@@ -47,12 +41,12 @@ module "app" {
   associate_public_ip = true
 
   user_data = templatefile("${path.module}/templates/app_user_data.sh.tpl", {
-    db_host      = module.db.private_ip
-    db_name      = var.db_name
-    db_user      = var.db_user
-    db_password  = random_password.db.result
-    app_py_b64   = filebase64("${path.module}/../app/app.py")
-    index_b64    = filebase64("${path.module}/../app/index.html")
+    db_host     = module.db.private_ip
+    db_name     = var.db_name
+    db_user     = var.db_user
+    db_password = var.db_password
+    app_py_b64  = filebase64("${path.module}/../app/app.py")
+    index_b64   = filebase64("${path.module}/../app/index.html")
   })
 }
 

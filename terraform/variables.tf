@@ -50,6 +50,11 @@ variable "db_user" {
   default = "appuser"
 }
 
+variable "db_password" {
+  description = "Database password supplied via a private tfvars file"
+  type        = string
+  sensitive   = true
+}
 
 variable "db_port" {
   type    = number
