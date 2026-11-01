@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euxo pipefail
 
-dnf install -y python3-pip
+dnf install -y python3-pip postgresql15
 pip3 install flask gunicorn psycopg2-binary
 
 mkdir -p /opt/app
